@@ -1,4 +1,5 @@
-# %% Generate events for bug from the Bugzilla
+# %%
+# Generate events for bug from the Bugzilla
 from enum import Enum
 from bugbug import db, bugzilla
 
@@ -118,7 +119,8 @@ for bug in bugzilla.get_bugs():
 
 events.sort()
 
-# %% Aggregate te events by day
+# %%
+# Aggregate te events by day
 day_status = current_status.copy()
 last_day = None
 
@@ -139,7 +141,8 @@ for when, stage, last_stage in events:
     day_status[last_stage] -= 1
 
 
-# %% Plot the results
+# %%
+# Plot the results
 import matplotlib.pyplot as plt
 import numpy as np
 
