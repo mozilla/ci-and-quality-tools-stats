@@ -86,6 +86,7 @@ for bug in bugzilla.get_bugs():
                 and change["field_name"] == "severity"
                 and change["added"] not in ("n/a", "--")
             ):
+                first_severity_change_at = event["when"]
                 bug_events.append(
                     (
                         event["when"],
