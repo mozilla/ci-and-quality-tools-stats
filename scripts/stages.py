@@ -1,17 +1,18 @@
 # %%
 # Generate events for bug from the Bugzilla
-from enum import Enum
+from enum import Enum, auto
 from bugbug import db, bugzilla
 
 
 class Stage(Enum):
-    NOTHING = 0
-    UNCONFIRMED = 1
-    CONFIRMED = 2
-    TRIAGED = 3
-    ASSIGNED = 4
-    IN_REVIEW = 5
-    RESOLVED = 6
+    NOTHING = auto()
+    NO_COMPONENT = auto()
+    UNCONFIRMED = auto()
+    CONFIRMED = auto()
+    TRIAGED = auto()
+    ASSIGNED = auto()
+    IN_REVIEW = auto()
+    RESOLVED = auto()
 
     def __lt__(self, other):
         return self.value < other.value
@@ -65,6 +66,7 @@ for bug in bugzilla.get_bugs():
 
     is_confirmed_after_open = False
     is_severity_changed = False
+    moved_to_component_at = None
     first_patch_at = None
     bug_events = []
 
@@ -93,6 +95,12 @@ for bug in bugzilla.get_bugs():
                         Stage.TRIAGED,
                     )
                 )
+            elif (
+                moved_to_component_at is None
+                and change["field_name"] == "component"
+                and change["added"] != "Untriaged"
+            ):
+                moved_to_component_at = event["when"]
 
     # Get the date for the first patch
     for attachment in bug["attachments"]:
@@ -103,12 +111,29 @@ for bug in bugzilla.get_bugs():
     if first_patch_at:
         bug_events.append((first_patch_at, Stage.IN_REVIEW))
 
-    bug_events.append(
-        (
-            bug["creation_time"],
-            Stage.UNCONFIRMED if is_confirmed_after_open else Stage.CONFIRMED,
+    if moved_to_component_at:
+        bug_events.append(
+            (
+                bug["creation_time"],
+                Stage.NO_COMPONENT,
+            )
         )
-    )
+        bug_events.append((moved_to_component_at, Stage.IN_COMPONENT))
+
+    elif is_confirmed_after_open:
+        bug_events.append(
+            (
+                bug["creation_time"],
+                Stage.UNCONFIRMED,
+            )
+        )
+    else:
+        bug_events.append(
+            (
+                bug["creation_time"],
+                Stage.CONFIRMED,
+            )
+        )
 
     # Add the bug events to the final list
     bug_events.sort()
