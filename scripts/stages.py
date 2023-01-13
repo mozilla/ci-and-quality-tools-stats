@@ -63,9 +63,9 @@ for bug in bugzilla.get_bugs():
         current_status[get_current_stage(bug)] += 1
         continue
 
-    confirmed_after_open = False
+    is_confirmed_after_open = False
+    is_severity_changed = False
     first_patch_at = None
-    first_severity_change_at = None
     bug_events = []
 
     # Get changes in the status field
@@ -79,14 +79,14 @@ for bug in bugzilla.get_bugs():
                     )
                 )
                 if change["removed"] == "UNCONFIRMED":
-                    confirmed_after_open = True
+                    is_confirmed_after_open = True
 
             elif (
-                first_severity_change_at is None
+                is_severity_changed
                 and change["field_name"] == "severity"
                 and change["added"] not in ("n/a", "--")
             ):
-                first_severity_change_at = event["when"]
+                is_severity_changed = True
                 bug_events.append(
                     (
                         event["when"],
@@ -106,7 +106,7 @@ for bug in bugzilla.get_bugs():
     bug_events.append(
         (
             bug["creation_time"],
-            Stage.UNCONFIRMED if confirmed_after_open else Stage.CONFIRMED,
+            Stage.UNCONFIRMED if is_confirmed_after_open else Stage.CONFIRMED,
         )
     )
 
