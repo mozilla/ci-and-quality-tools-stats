@@ -3,6 +3,8 @@
 from enum import Enum, auto
 from bugbug import db, bugzilla
 
+OLDEST_BUG = "2021-01-01"
+
 
 class Stage(Enum):
     NOTHING = auto()
@@ -53,24 +55,22 @@ def get_current_stage(bug):
     return stage
 
 
-start_date = "2022-01-01"
-
 db.download(bugzilla.BUGS_DB)
 for bug in bugzilla.get_bugs():
-    if bug["type"] != "defect":
-        continue
-
-    if bug["last_change_time"] < start_date:
-        current_status[get_current_stage(bug)] += 1
+    if (
+        bug["type"] != "defect"
+        or bug["product"] == "Invalid Bugs"
+        or bug["creation_time"] < OLDEST_BUG
+    ):
         continue
 
     is_confirmed_after_open = False
     is_severity_changed = False
-    moved_to_component_at = None
+    is_moved_to_component_after_open = False
     first_patch_at = None
     bug_events = []
 
-    # Get changes in the status field
+    # Get stage changing events from the bug history
     for event in bug["history"]:
         for change in event["changes"]:
             if change["field_name"] == "status":
@@ -83,24 +83,23 @@ for bug in bugzilla.get_bugs():
                 if change["removed"] == "UNCONFIRMED":
                     is_confirmed_after_open = True
 
-            elif (
-                is_severity_changed
-                and change["field_name"] == "severity"
-                and change["added"] not in ("n/a", "--")
-            ):
-                is_severity_changed = True
-                bug_events.append(
-                    (
-                        event["when"],
-                        Stage.TRIAGED,
+            elif change["field_name"] == "severity":
+                if not is_severity_changed and change["added"] not in ("n/a", "--"):
+                    is_severity_changed = True
+                    bug_events.append(
+                        (
+                            event["when"],
+                            Stage.TRIAGED,
+                        )
                     )
-                )
-            elif (
-                moved_to_component_at is None
-                and change["field_name"] == "component"
-                and change["added"] != "Untriaged"
-            ):
-                moved_to_component_at = event["when"]
+            elif change["field_name"] == "component":
+                if (
+                    not is_moved_to_component_after_open
+                    and change["added"] != "Untriaged"
+                ):
+                    is_moved_to_component_after_open = True
+                    # If the bug was confirmed at this time, this even will be filtered out
+                    bug_events.append((event["when"], Stage.UNCONFIRMED))
 
     # Get the date for the first patch
     for attachment in bug["attachments"]:
@@ -111,16 +110,14 @@ for bug in bugzilla.get_bugs():
     if first_patch_at:
         bug_events.append((first_patch_at, Stage.IN_REVIEW))
 
-    if moved_to_component_at:
+    if is_moved_to_component_after_open or bug["component"] == "Untriaged":
         bug_events.append(
             (
                 bug["creation_time"],
                 Stage.NO_COMPONENT,
             )
         )
-        bug_events.append((moved_to_component_at, Stage.IN_COMPONENT))
-
-    elif is_confirmed_after_open:
+    elif is_confirmed_after_open or bug["status"] == "UNCONFIRMED":
         bug_events.append(
             (
                 bug["creation_time"],
@@ -143,17 +140,22 @@ for bug in bugzilla.get_bugs():
             events.append((when, stage, last_stage))
             last_stage = stage
 
+    if last_stage == Stage.NO_COMPONENT and bug["component"] != "Untriaged":
+        raise Exception("Bug cannot be in NO_COMPONENT stage and have a component")
+
 events.sort()
 
 # %%
 # Aggregate te events by day
+CHART_STARTS_AFTER = "2022-01-01"
+
 day_status = current_status.copy()
 last_day = None
 
 status_by_day = {stage: [] for stage in day_status}
 dates = []
 
-last_day = start_date
+last_day = CHART_STARTS_AFTER
 for when, stage, last_stage in events:
     day = when[:10]
     if day > last_day:
@@ -185,8 +187,9 @@ fig, ax = plt.subplots()
 ax.stackplot(x, y, labels=labels, alpha=0.8)
 ax.legend(bbox_to_anchor=(1.32, 0.5), loc="center right")
 ax.set(
+    ylim=(20000, None),
     xlim=(x[0], x[-1]),
-    title="Workflow for defect bugs from bugbug",
+    title=f"Workflow for defect bugs from bugbug (created since {OLDEST_BUG})",
     ylabel="Number of Bugs",
 )
 ax.tick_params(axis="x", labelrotation=40)
