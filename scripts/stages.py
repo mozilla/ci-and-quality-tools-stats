@@ -8,6 +8,8 @@ OLDEST_BUG = "2020-01-01"
 
 NI_PAT = re.compile(r"needinfo\?\((.*?)\)")
 
+db.download(bugzilla.BUGS_DB)
+
 
 class Stage(Enum):
     NOTHING = auto()
@@ -15,7 +17,7 @@ class Stage(Enum):
     UNCONFIRMED = auto()
     CONFIRMED = auto()
     PENDING_NEEDINFO = auto()
-    REMOVE_NEEDINFO = auto()
+    ANSWERED_NEEDINFO = auto()
     TRIAGED = auto()
     ASSIGNED = auto()
     IN_REVIEW = auto()
@@ -26,9 +28,6 @@ class Stage(Enum):
 
     def __str__(self) -> str:
         return self.name.capitalize().replace("_", " ")
-
-
-events = []
 
 
 def status_to_stage(status):
@@ -67,8 +66,9 @@ def default_filter(bug):
     )
 
 
-def get_events(filter_func=default_filter):
-    db.download(bugzilla.BUGS_DB)
+def get_events(filter_func):
+    events = []
+
     for bug in bugzilla.get_bugs():
         if filter_func(bug):
             continue
@@ -156,7 +156,7 @@ def get_events(filter_func=default_filter):
                 bug_events.append(
                     (
                         event["time"],
-                        Stage.REMOVE_NEEDINFO,
+                        Stage.ANSWERED_NEEDINFO,
                     )
                 )
 
@@ -203,19 +203,11 @@ def get_events(filter_func=default_filter):
         bug_events.sort()
         last_stage = Stage.NOTHING
         for when, stage in bug_events:
-            if stage is Stage.REMOVE_NEEDINFO:
-                if last_stage is not Stage.PENDING_NEEDINFO:
-                    continue
-
-                for event in reversed(events):
-                    if event[1] not in (Stage.PENDING_NEEDINFO, Stage.REMOVE_NEEDINFO):
-                        stage = event[1]
-                        break
-                    if event[2] is Stage.NOTHING:
-                        raise Exception("No stage found for REMOVE_NEEDINFO")
-
-            if stage > last_stage or last_stage is Stage.PENDING_NEEDINFO:
-                # Ignore stages that go backwards
+            if stage > last_stage or (
+                stage == Stage.PENDING_NEEDINFO
+                and last_stage == Stage.ANSWERED_NEEDINFO
+            ):
+                # Ignore stages that go backwards (except ANSWERED_NEEDINFO -> PENDING_NEEDINFO)
                 events.append((when, stage, last_stage))
                 last_stage = stage
 
@@ -244,8 +236,8 @@ def aggregate_events_by_day(events):
             last_day = day
             dates.append(day)
 
-            for stage, num in day_status.items():
-                status_by_day[stage].append(num)
+            for _stage, num in day_status.items():
+                status_by_day[_stage].append(num)
 
         day_status[stage] += 1
         day_status[last_stage] -= 1
@@ -261,29 +253,27 @@ import numpy as np
 plt.style.use("seaborn-v0_8-whitegrid")
 
 
-def plot_stages_over_time(status_by_day, dates, title):
+def plot_stages_over_time(status_by_day, dates, title, first_date="2022-06-01"):
 
     labels = sorted(
-        [
-            stage
-            for stage in status_by_day
-            if stage not in (Stage.NOTHING, stage.REMOVE_NEEDINFO)
-        ],
+        [stage for stage in Stage if stage != Stage.NOTHING],
         reverse=True,
     )
     x = np.array(dates).astype(np.datetime64)
     y = np.vstack(status_by_day[stage] for stage in labels)
 
-    first_date = np.datetime64("2022-06-01")
-    first_date_idx = np.where(x == first_date)[0][0]
-    min_y_value = y[0][first_date_idx] - 1000
+    first_date_idx = sum(1 for date in dates if date < first_date)
+    if first_date_idx == len(dates):
+        first_date_idx = 0
+    min_y_value = y[0][first_date_idx]
+    min_y_value -= min_y_value * 0.05
 
     fig, ax = plt.subplots()
     ax.stackplot(x, y, labels=labels, alpha=0.8)
     ax.legend(bbox_to_anchor=(1.35, 0.5), loc="center right")
     ax.set(
         ylim=(min_y_value, None),
-        xlim=(first_date, x[-1]),
+        xlim=(np.datetime64(first_date), x[-1]),
         title=title,
         ylabel="Number of Bugs",
     )
@@ -291,9 +281,10 @@ def plot_stages_over_time(status_by_day, dates, title):
     fig.show()
 
 
-#%% Show a chart for all products
+# %%
+# Show a chart for all products
 
-events = get_events()
+events = get_events(default_filter)
 status_by_day, dates = aggregate_events_by_day(events)
 plot_stages_over_time(
     status_by_day,
@@ -301,20 +292,28 @@ plot_stages_over_time(
     f"Workflow for defect bugs created since {OLDEST_BUG}",
 )
 
-# %% Show a chart per product
+# %%
+# Show a chart per each product
 
 
 def filler_by_product(product):
-    return lambda bug: default_filter(bug) and bug["product"] == product
+    return lambda bug: default_filter(bug) or bug["product"] != product
 
+
+first_date = "2022-06-01"
 
 for product in bugzilla.PRODUCTS:
     events = get_events(filler_by_product(product))
+    if not events or events[-1][0] < first_date:
+        print(f"No data for {product}")
+        continue
     status_by_day, dates = aggregate_events_by_day(events)
     plot_stages_over_time(
         status_by_day,
         dates,
         f"Workflow for defect bugs created since {OLDEST_BUG} - {product}",
+        first_date,
     )
+
 
 # %%
