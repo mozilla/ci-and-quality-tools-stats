@@ -1,6 +1,5 @@
 from bugbug import db, bugzilla
 
-db.download(bugzilla.BUGS_DB)
 
 def search_false_positives():
     counter = 0
@@ -15,6 +14,11 @@ def search_false_positives():
     return counter
 
 if __name__ == "__main__":
-    db.download(bugzilla.BUGS_DB)
+    # db.register(
+    #     bugzilla.BUGS_DB,
+    #     "https://community-tc.services.mozilla.com/api/index/v1/task/project.bugbug.data_bugs.latest/artifacts/public/bugs.json.zst",
+    #     10
+    # )
+    # db.download(bugzilla.BUGS_DB)
     counter = search_false_positives()
     print(f"Number of bugs marked as false positives: {counter}")
