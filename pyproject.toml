@@ -1,0 +1,9 @@
+[project]
+name = "ci-and-quality-tools-stats"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "bugbug>=0.0.596",
+]
